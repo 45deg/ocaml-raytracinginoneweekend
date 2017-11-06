@@ -84,16 +84,11 @@ let world_hit objs ray tmin tmax =
       | None -> acc
   in fst (List.fold_left f (None, tmax) objs)
 
-(* material *)
+(* materials/helper *)
 let random_in_unit_shpere () = 
   { x = 2. *. (Random.float 1.) -. 1.;
     y = 2. *. (Random.float 1.) -. 1.;
     z = 2. *. (Random.float 1.) -. 1. }
-
-let labertarian_mat att r re = 
-  let target = re.p +@ re.n +@ random_in_unit_shpere () in
-  Some ({ o = re.p; d = target -@ re.p }, att)
-
 let reflect v n = v -@ (2. *. dot v n) *@ n
 let refract v n r =
   let uv = unit v in
@@ -102,14 +97,23 @@ let refract v n r =
   if d > 0. then Some (r *@ (uv -@ dt *@ n) -@ (sqrt d) *@ n)
   else None
 
+type obj_type = 
+  | Material of ray * vec3
+  | Light of vec3
+
+let light att r re =
+  let dn = dot re.n (unit r.d) in
+  Light (0.5 *. (1. -. dn) *@ att)
+
+(* materials *)
+let labertarian_mat att r re = 
+  let target = re.n +@ random_in_unit_shpere () in
+  Material ({ o = re.p; d = target }, att)
+
 let metal_mat att fuzz r re = 
   let reflect v n = v -@ (2. *. dot v n) *@ n in
   let d = reflect (unit r.d) re.n in
-  if dot d re.n > 0. then Some (
-                    { o = re.p;
-                      d = d +@ (fuzz *@ random_in_unit_shpere ()) }, att)
-                     else None
-
+  Material ({ o = re.p; d = d +@ (fuzz *@ random_in_unit_shpere ()) }, att)
 
 let dialectric_mat ri r re = 
   let att = { x = 1.; y = 1.; z = 1.; } in
@@ -122,7 +126,7 @@ let dialectric_mat ri r re =
   let schlick = 
     let r = pow ((1. -. ri) /. (1. +. ri)) 2 in
     r +. (1. -. r) *. (pow (1. -. cosi) 5) in
-  Some ({ o = re.p;
+  Material ({ o = re.p;
     d = match refract r.d on ratio with 
         | Some refr when (Random.float 1.0) > schlick -> refr
         | _ -> refl
@@ -132,17 +136,15 @@ let dialectric_mat ri r re =
 let color r world =
   let rec go r depth acc =
     match world_hit world r 0.001 max_float with
-      | Some (re, mat) -> 
+      | Some (re, mat) -> (* hit *)
         if depth < 50 then
           match mat r re with 
-            | Some (s,a) -> go s (depth+1) (a *@@ acc)
-            | None -> { x = 0.; y = 0.; z = 0. }
+            | Material (s,a) -> go s (depth+1) (a *@@ acc)
+            | Light a -> a *@@ acc
         else
           { x = 0.; y = 0.; z = 0. }
-      | None -> 
-        let n = unit r.d in
-        let t = 0.5 *. (n.y +. 1.) in
-        acc *@@ ((1. -. t) *@ { x = 1.; y = 1.; z = 1. } +@ t *@ { x = 0.5; y = 0.7; z = 1. })
+      | None -> (* sky *) 
+          { x = 0.; y = 0.; z = 0. }
   in
     go r 0 { x = 1.; y = 1.; z = 1. }
 
@@ -168,7 +170,7 @@ let make_random_world () =
                    | None    -> omap f xs
   in
   let ground = (sphere {x = 0.; y = -1000.; z = 0.} 1000.,
-                labertarian_mat {x = 0.5; y = 0.5; z = 0.5}) in
+                labertarian_mat {x = 1.; y = 1.; z = 1.}) in
   let spread (a,b) = 
     let r () = Random.float 1. in
     let r2 () = r() *. r () in
@@ -179,8 +181,9 @@ let make_random_world () =
     if len (c -@ { x = 4.; y = 0.2; z = 0.}) > 0.9 then
       Some (sphere c 0.2,
        match r() with
-        | p when p < 0.8 -> labertarian_mat {x = r2 (); y = r2 (); z = r2 ()}
-        | p when p < 0.95 -> metal_mat {x = ra (); y = ra (); z = ra ()} (0.5 *. r ())
+        | p when p < 0.2 -> labertarian_mat {x = r2 (); y = r2 (); z = r2 ()}
+        | p when p < 0.3 -> metal_mat {x = ra (); y = ra (); z = ra ()} (0.5 *. r ())
+        | p when p < 0.6 -> light {x = ra (); y = ra (); z = ra ()}
         | _ -> dialectric_mat 1.5
       )
     else
@@ -190,12 +193,12 @@ let make_random_world () =
     [
       (sphere { x = 0.; y = 1.; z = 0. } 1., dialectric_mat 1.5);
       (sphere { x = -4.; y = 1.; z = 0. } 1., labertarian_mat {x = 0.4; y = 0.2; z = 0.1});
-      (sphere { x = 4.; y = 1.; z = 0. } 1., metal_mat {x = 0.7; y = 0.6; z = 0.5} 0.0);
+      (sphere { x = 4.; y = 1.; z = 0. } 1., metal_mat {x = 0.7; y = 0.6; z = 0.5} 0.);
     ]
 
 (* member *)
 let () =
-  let width = 600 in
+  let width = 800 in
   let height = 400 in 
   let lookfrom = { x = 13.; y = 2.; z = 3. } in
   let lookat = { x = 0. ; y = 0.; z = 0. } in
@@ -205,7 +208,7 @@ let () =
     (float_of_int width /. float_of_int height)
     0.1 10.0
   in
-  let ns = 30 in
+  let ns = 100 in
   let world = make_random_world () in
     Printf.printf "P3\n%d %d\n255\n" width height;
     for j = height - 1 downto 0 do
