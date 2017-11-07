@@ -91,8 +91,7 @@ let random_in_unit_shpere () =
     z = 2. *. (Random.float 1.) -. 1. }
 
 let labertarian_mat att r re = 
-  let target = re.p +@ re.n +@ random_in_unit_shpere () in
-  Some ({ o = re.p; d = target -@ re.p }, att)
+  Some ({ o = re.p; d = re.n +@ random_in_unit_shpere () }, att)
 
 let reflect v n = v -@ (2. *. dot v n) *@ n
 let refract v n r =
